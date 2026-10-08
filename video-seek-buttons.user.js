@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HTML5视频 快进快退按钮（左右纵排 10分钟/1分钟/10秒 · 全屏可用 · 手机适配）
 // @namespace    https://trae.local/video-seek-buttons
-// @version      1.6.0
+// @version      1.6.1
 // @description  快退键纵向排列在视频左侧、快进键纵向排列在右侧，纵向居中，自上而下为 10分钟/1分钟/10秒；容器全屏与原生视频全屏均可见，桌面+手机触摸长按连发，自动跟随控件隐藏。
 // @author       you
 // @match        *://*/*
@@ -16,7 +16,7 @@
 
   // ============ 可调参数 ============
   const CONFIG = {
-    STEP_BIG: 600,      // 10分钟
+    STEP_BIG: 300,      // 5分钟
     STEP_MID: 60,       // 1分钟
     STEP_SMALL: 10,     // 10秒
     REPEAT_MS: 160,     // 长按连发间隔（毫秒）
@@ -74,6 +74,28 @@
     pointer-events: auto;
     transform: translateY(-50%) translateX(0);
   }
+  .vsh-toggle {
+    position: fixed;
+    z-index: ${Z};
+    width: calc(34px * var(--vsh-s, 1));
+    height: calc(34px * var(--vsh-s, 1));
+    padding: 0;
+    border: none;
+    border-radius: calc(10px * var(--vsh-s, 1));
+    background: rgba(20, 22, 26, 0.72);
+    color: #fff;
+    font-size: calc(18px * var(--vsh-s, 1));
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    opacity: .78;
+    transition: opacity .18s, background .12s;
+  }
+  .vsh-toggle:hover,
+  .vsh-toggle:focus-visible { opacity: 1; background: rgba(20, 22, 26, .9); }
   .vsh-btn {
     appearance: none;
     -webkit-appearance: none;
@@ -149,7 +171,7 @@
   }
 
   // ============ 每个视频的状态 ============
-  // item: { video, panes:[leftPane, rightPane], buttons:[{el,seconds}], tip, idleTimer, tipTimer }
+  // item: { video, panes:[leftPane, rightPane], toggle, buttons:[{el,seconds}], tip, idleTimer, tipTimer, expanded }
   const items = [];
 
   // All document-level wake handling is shared by every video. This avoids
@@ -179,13 +201,13 @@
 
   // 左侧：快退（自上而下 10分钟 / 1分钟 / 10秒）
   const LEFT_BUTTONS = [
-    { label: '« 10分钟', seconds: -CONFIG.STEP_BIG, title: '快退 10 分钟' },
+    { label: '« 5分钟', seconds: -CONFIG.STEP_BIG, title: '快退 5 分钟' },
     { label: '‹ 1分钟', seconds: -CONFIG.STEP_MID, title: '快退 1 分钟' },
     { label: '‹ 10秒', seconds: -CONFIG.STEP_SMALL, title: '快退 10 秒' }
   ];
   // 右侧：快进（自上而下 10分钟 / 1分钟 / 10秒）
   const RIGHT_BUTTONS = [
-    { label: '10分钟 »', seconds: CONFIG.STEP_BIG, title: '快进 10 分钟' },
+    { label: '5分钟 »', seconds: CONFIG.STEP_BIG, title: '快进 5 分钟' },
     { label: '1分钟 ›', seconds: CONFIG.STEP_MID, title: '快进 1 分钟' },
     { label: '10秒 ›', seconds: CONFIG.STEP_SMALL, title: '快进 10 秒' }
   ];
@@ -217,14 +239,32 @@
     tip.innerHTML =
       '<div class="vsh-arrow-ico"></div><div class="vsh-txt"></div><div class="vsh-pos"></div>';
 
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'vsh-toggle';
+    toggle.textContent = '⏩';
+    toggle.title = '展开快进快退按钮';
+    toggle.setAttribute('aria-label', toggle.title);
+
     const item = {
       video,
       panes: [left.pane, right.pane],
       buttons: left.buttons.concat(right.buttons),
+      toggle,
       tip,
       idleTimer: null,
-      tipTimer: null
+      tipTimer: null,
+      expanded: false
     };
+    toggle.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      item.expanded = !item.expanded;
+      updateExpandedState(item);
+      if (item.expanded) wake(item);
+    });
+    toggle.addEventListener('pointerdown', (e) => e.stopPropagation());
+    toggle.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
     bindInteractions(item);
     bindAutoHide(item);
     items.push(item);
@@ -321,13 +361,21 @@
 
   // ---------- 自动隐藏：模拟原生控件，动一下显示，播放中静止淡出 ----------
   function wake(item) {
-    item.panes.forEach((p) => p.classList.add('vsh-show'));
+    updateExpandedState(item);
     clearTimeout(item.idleTimer);
-    if (!item.video.paused) {
+    if (item.expanded && !item.video.paused) {
       item.idleTimer = setTimeout(() => {
-        item.panes.forEach((p) => p.classList.remove('vsh-show'));
+        item.expanded = false;
+        updateExpandedState(item);
       }, CONFIG.IDLE_MS);
     }
+  }
+
+  function updateExpandedState(item) {
+    item.panes.forEach((p) => p.classList.toggle('vsh-show', item.expanded));
+    item.toggle.textContent = item.expanded ? '×' : '⏩';
+    item.toggle.title = item.expanded ? '折叠快进快退按钮' : '展开快进快退按钮';
+    item.toggle.setAttribute('aria-label', item.toggle.title);
   }
 
   function bindAutoHide(item) {
@@ -340,7 +388,7 @@
     v.addEventListener('play', wakeFn);
     v.addEventListener('pause', () => {
       clearTimeout(item.idleTimer);
-      item.panes.forEach((p) => p.classList.add('vsh-show'));
+      updateExpandedState(item);
     });
     item.panes.forEach((p) => p.addEventListener('pointermove', wakeFn));
 
@@ -355,6 +403,7 @@
     const visible = r.width > 0 && r.height > 0;
     item.panes.forEach((p) => { p.style.display = visible ? '' : 'none'; });
     item.tip.style.display = visible ? '' : 'none';
+    item.toggle.style.display = visible ? '' : 'none';
     if (!visible) return;
 
     const gap = CONFIG.EDGE_GAP;
@@ -371,6 +420,8 @@
       item.panes[1].style.right = `${gap}px`;
       item.tip.style.top = `${h / 2}px`;
       item.tip.style.left = `${w / 2}px`;
+      item.toggle.style.top = `${gap}px`;
+      item.toggle.style.left = `${Math.max(gap, w - gap - item.toggle.offsetWidth)}px`;
       return;
     }
 
@@ -393,6 +444,8 @@
 
     item.tip.style.top = `${centerY}px`;
     item.tip.style.left = `${r.left + r.width / 2}px`;
+    item.toggle.style.top = `${r.top + gap}px`;
+    item.toggle.style.left = `${Math.max(r.left + gap, r.right - gap - item.toggle.offsetWidth)}px`;
   }
 
   // ============ 全屏适配 ============
@@ -405,7 +458,7 @@
   //         → 系统接管渲染，任何网页元素都无法显示（浏览器限制）。
   function relocate(item) {
     const fs = fullscreenElement();
-    const targets = item.panes.concat([item.tip]);
+    const targets = item.panes.concat([item.tip, item.toggle]);
 
     if (!fs) {
       targets.forEach((el) => exitTopLayer(el));
@@ -559,7 +612,7 @@
   function destroyItem(item) {
     clearTimeout(item.idleTimer);
     clearTimeout(item.tipTimer);
-    item.panes.concat([item.tip]).forEach((el) => {
+    item.panes.concat([item.tip, item.toggle]).forEach((el) => {
       exitTopLayer(el);
       el.remove();
     });
