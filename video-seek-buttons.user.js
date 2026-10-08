@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HTML5视频 快进快退按钮（左右纵排 10分钟/1分钟/10秒 · 全屏可用 · 手机适配）
 // @namespace    https://trae.local/video-seek-buttons
-// @version      1.5.1
+// @version      1.6.0
 // @description  快退键纵向排列在视频左侧、快进键纵向排列在右侧，纵向居中，自上而下为 10分钟/1分钟/10秒；容器全屏与原生视频全屏均可见，桌面+手机触摸长按连发，自动跟随控件隐藏。
 // @author       you
 // @match        *://*/*
@@ -151,6 +151,31 @@
   // ============ 每个视频的状态 ============
   // item: { video, panes:[leftPane, rightPane], buttons:[{el,seconds}], tip, idleTimer, tipTimer }
   const items = [];
+
+  // All document-level wake handling is shared by every video. This avoids
+  // retaining one capture listener per video in long-lived SPA pages.
+  function wakeFromDocument(e) {
+    let x = null;
+    let y = null;
+    if (typeof e.clientX === 'number' && isFinite(e.clientX)) {
+      x = e.clientX;
+      y = e.clientY;
+    } else if (e.touches && e.touches.length > 0) {
+      x = e.touches[0].clientX;
+      y = e.touches[0].clientY;
+    }
+    if (x === null) return;
+    for (const item of items) {
+      const r = item.video.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0 && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+        wake(item);
+      }
+    }
+  }
+
+  document.addEventListener('pointerdown', wakeFromDocument, true);
+  document.addEventListener('touchstart', wakeFromDocument, { capture: true, passive: true });
+  document.addEventListener('pointermove', wakeFromDocument, { capture: true, passive: true });
 
   // 左侧：快退（自上而下 10分钟 / 1分钟 / 10秒）
   const LEFT_BUTTONS = [
@@ -318,27 +343,6 @@
       item.panes.forEach((p) => p.classList.add('vsh-show'));
     });
     item.panes.forEach((p) => p.addEventListener('pointermove', wakeFn));
-
-    // 兜底：手机端全屏时，点击通常落在播放器的手势层/覆盖层上而非 video 本身，
-    // 导致原生进度条重新出现而按钮不出现。在 document 捕获阶段监听，
-    // 只要触点位于视频区域内，就视为“操作了播放器”并唤醒按钮。
-    const docWake = (e) => {
-      let x = null;
-      let y = null;
-      if (typeof e.clientX === 'number' && isFinite(e.clientX)) {
-        x = e.clientX;
-        y = e.clientY;
-      } else if (e.touches && e.touches.length > 0) {
-        x = e.touches[0].clientX;
-        y = e.touches[0].clientY;
-      }
-      if (x === null) return;
-      const r = v.getBoundingClientRect();
-      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) wake(item);
-    };
-    document.addEventListener('pointerdown', docWake, true);
-    document.addEventListener('touchstart', docWake, { capture: true, passive: true });
-    document.addEventListener('pointermove', docWake, { capture: true, passive: true });
 
     // 初始：暂停时常驻，播放时 2.6 秒后淡出
     wake(item);
@@ -552,6 +556,24 @@
     });
   }
 
+  function destroyItem(item) {
+    clearTimeout(item.idleTimer);
+    clearTimeout(item.tipTimer);
+    item.panes.concat([item.tip]).forEach((el) => {
+      exitTopLayer(el);
+      el.remove();
+    });
+    const index = items.indexOf(item);
+    if (index !== -1) items.splice(index, 1);
+  }
+
+  function pruneItems() {
+    for (let i = items.length - 1; i >= 0; i--) {
+      const item = items[i];
+      if (!item.video.isConnected) destroyItem(item);
+    }
+  }
+
   injectStyle();
   scan();
 
@@ -563,6 +585,7 @@
 
   // 每帧同步位置（滚动/页面内全屏/布局变化都能跟随），开销很小
   function frameLoop() {
+    pruneItems();
     for (const item of items) {
       // 播放器在全屏时重建控件导致按钮被移出 DOM 时，自动重新挂载
       if (!item.panes[0].isConnected || !item.panes[1].isConnected) relocate(item);
