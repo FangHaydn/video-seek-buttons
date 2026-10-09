@@ -1,14 +1,16 @@
 // ==UserScript==
-// @name         HTML5视频 快进快退按钮（左右纵排 10分钟/1分钟/10秒 · 全屏可用 · 手机适配）
+// @name         HTML5视频 快进快退按钮（左右纵排 5分钟/1分钟/10秒 · 全屏可用 · 手机适配）
 // @namespace    https://trae.local/video-seek-buttons
-// @version      1.6.1
-// @description  快退键纵向排列在视频左侧、快进键纵向排列在右侧，纵向居中，自上而下为 10分钟/1分钟/10秒；容器全屏与原生视频全屏均可见，桌面+手机触摸长按连发，自动跟随控件隐藏。
+// @version      1.7.0
+// @description  快退键纵向排列在视频左侧、快进键纵向排列在右侧，纵向居中，自上而下为 5分钟/1分钟/10秒（步长可在 ⚙ 设置中自定义，支持站点黑名单）；容器全屏与原生视频全屏均可见，桌面+手机触摸长按连发（越按越快），自动跟随控件隐藏。
 // @author       you
 // @match        *://*/*
 // @license      MIT
 // @run-at       document-idle
 // @noframes
-// @grant        none
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_registerMenuCommand
 // ==/UserScript==
 
 (function () {
@@ -33,6 +35,57 @@
     MIN_W: 300,         // 只给“大视频”挂按钮，过滤小预览视频
     MIN_H: 160
   };
+
+  // 出厂默认值（供“恢复默认”使用；CONFIG 可能被已保存的设置覆盖）
+  const DEFAULTS = Object.assign({}, CONFIG);
+
+  // ============ 设置持久化：优先 GM 存储（跨站点全局生效），否则 localStorage（仅当前站点） ============
+  const store = {
+    get(key, def) {
+      try {
+        if (typeof GM_getValue === 'function') {
+          const v = GM_getValue('vsh:' + key);
+          return v === undefined || v === null ? def : v;
+        }
+        const raw = localStorage.getItem('vsh:' + key);
+        return raw === null ? def : JSON.parse(raw);
+      } catch (e) {
+        return def;
+      }
+    },
+    set(key, val) {
+      try {
+        if (typeof GM_setValue === 'function') {
+          GM_setValue('vsh:' + key, val);
+          return;
+        }
+        localStorage.setItem('vsh:' + key, JSON.stringify(val));
+      } catch (e) {}
+    }
+  };
+
+  function clampNum(v, def, min, max) {
+    const n = Number(v);
+    if (!isFinite(n)) return def;
+    return Math.min(max, Math.max(min, n));
+  }
+
+  // 启动时恢复已保存设置
+  (function loadSettings() {
+    const s = store.get('cfg', null);
+    if (!s || typeof s !== 'object') return;
+    CONFIG.STEP_BIG = Math.round(clampNum(s.STEP_BIG, DEFAULTS.STEP_BIG, 5, 28800));
+    CONFIG.STEP_MID = Math.round(clampNum(s.STEP_MID, DEFAULTS.STEP_MID, 5, 3600));
+    CONFIG.STEP_SMALL = Math.round(clampNum(s.STEP_SMALL, DEFAULTS.STEP_SMALL, 1, 600));
+    CONFIG.REPEAT_MS = Math.round(clampNum(s.REPEAT_MS, DEFAULTS.REPEAT_MS, 40, 1000));
+    CONFIG.IDLE_MS = clampNum(s.IDLE_MS, DEFAULTS.IDLE_MS, 0, 60000);
+  })();
+
+  // 站点黑名单（在设置面板中切换）
+  let siteDisabled = (function () {
+    const bl = store.get('blacklist', []);
+    return Array.isArray(bl) && bl.includes(location.hostname);
+  })();
 
   const Z = 2147483647;
   // 触屏设备（手机/平板）
@@ -144,6 +197,78 @@
   .vsh-tip .vsh-arrow-ico { font-size: 30px; line-height: 1; }
   .vsh-tip .vsh-txt { font-size: 14px; font-weight: 600; }
   .vsh-tip .vsh-pos { font-size: 11px; opacity: .75; }
+  .vsh-gear { font-size: calc(15px * var(--vsh-s, 1)); }
+  .vsh-settings {
+    position: fixed;
+    z-index: ${Z};
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 320px;
+    max-width: calc(100vw - 32px);
+    box-sizing: border-box;
+    padding: 16px;
+    border-radius: 14px;
+    background: rgba(24, 26, 31, .96);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 8px 32px rgba(0,0,0,.5);
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 13px;
+    color-scheme: dark;
+    display: none;
+  }
+  .vsh-settings.vsh-show { display: block; }
+  .vsh-settings h3 { margin: 0 0 12px; font-size: 14px; font-weight: 600; }
+  .vsh-set-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 9px 0; }
+  .vsh-set-row span { opacity: .85; }
+  .vsh-settings input[type="number"] {
+    width: 88px;
+    box-sizing: border-box;
+    padding: 5px 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,.18);
+    background: rgba(255,255,255,.08);
+    color: #fff;
+    font-size: 13px;
+  }
+  .vsh-set-check { display: flex; align-items: center; gap: 8px; margin: 12px 0 2px; cursor: pointer; }
+  .vsh-set-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  .vsh-set-actions button {
+    appearance: none;
+    border: none;
+    border-radius: 10px;
+    padding: 7px 14px;
+    font-size: 13px;
+    cursor: pointer;
+    background: rgba(255,255,255,.12);
+    color: #fff;
+    font-family: inherit;
+  }
+  .vsh-set-actions button:hover { background: rgba(255,255,255,.22); }
+  .vsh-set-actions .vsh-primary { background: rgba(76,139,245,.9); }
+  .vsh-set-actions .vsh-primary:hover { background: rgba(76,139,245,1); }
+  .vsh-chip {
+    position: fixed;
+    right: 14px;
+    bottom: 14px;
+    z-index: ${Z};
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: rgba(20, 22, 26, .6);
+    color: #fff;
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: .45;
+    transition: opacity .15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .vsh-chip:hover { opacity: 1; }
   `;
 
   function injectStyle() {
@@ -166,12 +291,22 @@
     return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
   }
 
+  // 时长/步长的中文描述：3600→“1 小时”，300→“5 分钟”，85→“1分25秒”，10→“10 秒”
+  function fmtDur(sec) {
+    const abs = Math.abs(sec);
+    if (!isFinite(abs)) return '--';
+    if (abs >= 3600 && abs % 3600 === 0) return `${abs / 3600} 小时`;
+    if (abs % 60 === 0) return `${abs / 60} 分钟`;
+    if (abs > 60) return `${Math.floor(abs / 60)}分${abs % 60}秒`;
+    return `${abs} 秒`;
+  }
+
   function fullscreenElement() {
     return document.fullscreenElement || document.webkitFullscreenElement || null;
   }
 
   // ============ 每个视频的状态 ============
-  // item: { video, panes:[leftPane, rightPane], toggle, buttons:[{el,seconds}], tip, idleTimer, tipTimer, expanded }
+  // item: { video, panes:[leftPane, rightPane], toggle, settingsBtn, buttons:[{el,seconds}], tip, idleTimer, tipTimer, expanded }
   const items = [];
 
   // All document-level wake handling is shared by every video. This avoids
@@ -199,18 +334,32 @@
   document.addEventListener('touchstart', wakeFromDocument, { capture: true, passive: true });
   document.addEventListener('pointermove', wakeFromDocument, { capture: true, passive: true });
 
-  // 左侧：快退（自上而下 10分钟 / 1分钟 / 10秒）
-  const LEFT_BUTTONS = [
-    { label: '« 5分钟', seconds: -CONFIG.STEP_BIG, title: '快退 5 分钟' },
-    { label: '‹ 1分钟', seconds: -CONFIG.STEP_MID, title: '快退 1 分钟' },
-    { label: '‹ 10秒', seconds: -CONFIG.STEP_SMALL, title: '快退 10 秒' }
-  ];
-  // 右侧：快进（自上而下 10分钟 / 1分钟 / 10秒）
-  const RIGHT_BUTTONS = [
-    { label: '5分钟 »', seconds: CONFIG.STEP_BIG, title: '快进 5 分钟' },
-    { label: '1分钟 ›', seconds: CONFIG.STEP_MID, title: '快进 1 分钟' },
-    { label: '10秒 ›', seconds: CONFIG.STEP_SMALL, title: '快进 10 秒' }
-  ];
+  // 按钮定义按 CONFIG 实时生成，设置保存后可立即刷新文案与步长
+  // 左侧：快退（自上而下 大/中/小），右侧：快进
+  function buttonDefs() {
+    const big = fmtDur(CONFIG.STEP_BIG);
+    const mid = fmtDur(CONFIG.STEP_MID);
+    const small = fmtDur(CONFIG.STEP_SMALL);
+    return [
+      { label: `« ${big}`, seconds: -CONFIG.STEP_BIG, title: `快退 ${big}` },
+      { label: `‹ ${mid}`, seconds: -CONFIG.STEP_MID, title: `快退 ${mid}` },
+      { label: `‹ ${small}`, seconds: -CONFIG.STEP_SMALL, title: `快退 ${small}` },
+      { label: `${big} »`, seconds: CONFIG.STEP_BIG, title: `快进 ${big}` },
+      { label: `${mid} ›`, seconds: CONFIG.STEP_MID, title: `快进 ${mid}` },
+      { label: `${small} ›`, seconds: CONFIG.STEP_SMALL, title: `快进 ${small}` }
+    ];
+  }
+
+  // 设置变更后刷新已有按钮的文案与步长（前 3 个为快退，后 3 个为快进）
+  function updateButtonLabels(item) {
+    const defs = buttonDefs();
+    item.buttons.forEach((b, i) => {
+      b.seconds = defs[i].seconds;
+      b.el.textContent = defs[i].label;
+      b.el.title = defs[i].title;
+      b.el.setAttribute('aria-label', defs[i].title);
+    });
+  }
 
   function buildPane(defs) {
     const pane = document.createElement('div');
@@ -229,9 +378,10 @@
   }
 
   function createItem(video) {
-    const left = buildPane(LEFT_BUTTONS);
+    const defs = buttonDefs();
+    const left = buildPane(defs.slice(0, 3));
     left.pane.classList.add('vsh-pane', 'vsh-left');
-    const right = buildPane(RIGHT_BUTTONS);
+    const right = buildPane(defs.slice(3));
     right.pane.classList.add('vsh-pane', 'vsh-right');
 
     const tip = document.createElement('div');
@@ -246,11 +396,26 @@
     toggle.title = '展开快进快退按钮';
     toggle.setAttribute('aria-label', toggle.title);
 
+    const settingsBtn = document.createElement('button');
+    settingsBtn.type = 'button';
+    settingsBtn.className = 'vsh-toggle vsh-gear';
+    settingsBtn.textContent = '⚙';
+    settingsBtn.title = '快进快退设置';
+    settingsBtn.setAttribute('aria-label', settingsBtn.title);
+    settingsBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openSettings();
+    });
+    settingsBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+    settingsBtn.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+
     const item = {
       video,
       panes: [left.pane, right.pane],
       buttons: left.buttons.concat(right.buttons),
       toggle,
+      settingsBtn,
       tip,
       idleTimer: null,
       tipTimer: null,
@@ -274,24 +439,24 @@
   }
 
   // ---------- 跳转 ----------
-  function doSeek(item, seconds) {
+  // step 为本次实际跳转秒数；showSeconds 用于长按连发时显示累计偏移量
+  function doSeek(item, step, showSeconds) {
     const video = item.video;
+    const shown = showSeconds == null ? step : showSeconds;
     if (!isFinite(video.duration)) {
-      flashTip(item, seconds, null);
+      flashTip(item, shown, null);
       return;
     }
-    let target = (video.currentTime || 0) + seconds;
+    let target = (video.currentTime || 0) + step;
     target = Math.min(Math.max(0, target), video.duration);
     video.currentTime = target;
-    flashTip(item, seconds, { current: target, duration: video.duration });
+    flashTip(item, shown, { current: target, duration: video.duration });
   }
 
   function flashTip(item, seconds, pos) {
     const forward = seconds > 0;
     item.tip.querySelector('.vsh-arrow-ico').textContent = forward ? '▶' : '◀';
-    const abs = Math.abs(seconds);
-    const label = abs % 60 === 0 ? `${abs / 60} 分钟` : `${abs} 秒`;
-    item.tip.querySelector('.vsh-txt').textContent = (forward ? '快进 ' : '快退 ') + label;
+    item.tip.querySelector('.vsh-txt').textContent = (forward ? '快进 ' : '快退 ') + fmtDur(seconds);
     item.tip.querySelector('.vsh-pos').textContent =
       pos && isFinite(pos.duration) ? `${fmt(pos.current)} / ${fmt(pos.duration)}` : '';
 
@@ -303,15 +468,30 @@
   // ---------- 按键交互：点按一次 + 长按连发（桌面/手机统一 pointer 事件） ----------
   function bindInteractions(item) {
     item.buttons.forEach(({ el, seconds }) => {
-      let repeat = null;
+      let repeatTimer = null;
+      let holdStart = 0;
+      let cumulative = 0;
 
       const stop = () => {
         el.classList.remove('vsh-pressing');
-        if (repeat) {
-          clearInterval(repeat);
-          repeat = null;
+        if (repeatTimer) {
+          clearTimeout(repeatTimer);
+          repeatTimer = null;
         }
       };
+
+      // 长按连发渐进加速：按住 1.2s 后间隔减半、2.5s 后再减半（下限 40ms）
+      function scheduleRepeat() {
+        const held = performance.now() - holdStart;
+        let delay = CONFIG.REPEAT_MS;
+        if (held > 2500) delay = Math.max(40, CONFIG.REPEAT_MS / 4);
+        else if (held > 1200) delay = Math.max(40, CONFIG.REPEAT_MS / 2);
+        repeatTimer = setTimeout(() => {
+          cumulative += seconds;
+          doSeek(item, seconds, cumulative);
+          scheduleRepeat();
+        }, delay);
+      }
 
       el.addEventListener('pointerdown', (e) => {
         // 只响应主键/触摸，避免右键等
@@ -320,9 +500,11 @@
         e.stopPropagation();
         try { el.setPointerCapture(e.pointerId); } catch (_) {}
         el.classList.add('vsh-pressing');
+        holdStart = performance.now();
+        cumulative = seconds;
         doSeek(item, seconds);
         wake(item);
-        repeat = setInterval(() => doSeek(item, seconds), CONFIG.REPEAT_MS);
+        scheduleRepeat();
       });
 
       el.addEventListener('pointerup', stop);
@@ -363,7 +545,7 @@
   function wake(item) {
     updateExpandedState(item);
     clearTimeout(item.idleTimer);
-    if (item.expanded && !item.video.paused) {
+    if (item.expanded && !item.video.paused && CONFIG.IDLE_MS > 0) {
       item.idleTimer = setTimeout(() => {
         item.expanded = false;
         updateExpandedState(item);
@@ -404,6 +586,7 @@
     item.panes.forEach((p) => { p.style.display = visible ? '' : 'none'; });
     item.tip.style.display = visible ? '' : 'none';
     item.toggle.style.display = visible ? '' : 'none';
+    item.settingsBtn.style.display = visible ? '' : 'none';
     if (!visible) return;
 
     const gap = CONFIG.EDGE_GAP;
@@ -420,8 +603,11 @@
       item.panes[1].style.right = `${gap}px`;
       item.tip.style.top = `${h / 2}px`;
       item.tip.style.left = `${w / 2}px`;
+      const rotToggleLeft = Math.max(gap, w - gap - item.toggle.offsetWidth);
       item.toggle.style.top = `${gap}px`;
-      item.toggle.style.left = `${Math.max(gap, w - gap - item.toggle.offsetWidth)}px`;
+      item.toggle.style.left = `${rotToggleLeft}px`;
+      item.settingsBtn.style.top = `${gap}px`;
+      item.settingsBtn.style.left = `${Math.max(gap, rotToggleLeft - item.settingsBtn.offsetWidth - 6)}px`;
       return;
     }
 
@@ -444,8 +630,11 @@
 
     item.tip.style.top = `${centerY}px`;
     item.tip.style.left = `${r.left + r.width / 2}px`;
+    const toggleLeft = Math.max(r.left + gap, r.right - gap - item.toggle.offsetWidth);
     item.toggle.style.top = `${r.top + gap}px`;
-    item.toggle.style.left = `${Math.max(r.left + gap, r.right - gap - item.toggle.offsetWidth)}px`;
+    item.toggle.style.left = `${toggleLeft}px`;
+    item.settingsBtn.style.top = `${r.top + gap}px`;
+    item.settingsBtn.style.left = `${Math.max(r.left + gap, toggleLeft - item.settingsBtn.offsetWidth - 6 * scale)}px`;
   }
 
   // ============ 全屏适配 ============
@@ -458,7 +647,7 @@
   //         → 系统接管渲染，任何网页元素都无法显示（浏览器限制）。
   function relocate(item) {
     const fs = fullscreenElement();
-    const targets = item.panes.concat([item.tip, item.toggle]);
+    const targets = item.panes.concat([item.tip, item.toggle, item.settingsBtn]);
 
     if (!fs) {
       targets.forEach((el) => exitTopLayer(el));
@@ -501,6 +690,132 @@
     el.style.inset = '';
     el.style.margin = '';
     el._vshPopover = false;
+  }
+
+  // ============ 设置面板（⚙）与站点禁用角标 ============
+  let settingsEl = null;
+  let chipEl = null;
+
+  // 站点被禁用时在右下角保留一个小角标作为设置入口，便于随时恢复
+  function ensureChip() {
+    if (!siteDisabled) {
+      if (chipEl) {
+        chipEl.remove();
+        chipEl = null;
+      }
+      return;
+    }
+    if (chipEl && chipEl.isConnected) return;
+    if (!chipEl) {
+      chipEl = document.createElement('button');
+      chipEl.type = 'button';
+      chipEl.className = 'vsh-chip';
+      chipEl.textContent = '⚙';
+      chipEl.title = '快进快退按钮已在此站点禁用，点按打开设置';
+      chipEl.addEventListener('click', openSettings);
+    }
+    document.body.appendChild(chipEl);
+  }
+
+  function openSettings() {
+    if (!settingsEl) settingsEl = buildSettingsPanel();
+    const fs = fullscreenElement();
+    if (fs && !(fs instanceof HTMLVideoElement)) {
+      // 播放器容器全屏：放进容器即可正常渲染
+      appendSafe(fs, settingsEl);
+      exitTopLayer(settingsEl);
+    } else {
+      appendSafe(document.body, settingsEl);
+      // 原生 <video> 全屏需要 top layer；普通页面则确保不在 top layer
+      if (fs) enterTopLayer(settingsEl);
+      else exitTopLayer(settingsEl);
+    }
+    settingsEl.querySelector('#vsh-in-big').value = CONFIG.STEP_BIG / 60;
+    settingsEl.querySelector('#vsh-in-mid').value = CONFIG.STEP_MID / 60;
+    settingsEl.querySelector('#vsh-in-small').value = CONFIG.STEP_SMALL;
+    settingsEl.querySelector('#vsh-in-repeat').value = CONFIG.REPEAT_MS;
+    settingsEl.querySelector('#vsh-in-idle').value = CONFIG.IDLE_MS / 1000;
+    settingsEl.querySelector('#vsh-in-disable').checked = siteDisabled;
+    settingsEl.classList.add('vsh-show');
+  }
+
+  function closeSettings() {
+    if (!settingsEl) return;
+    settingsEl.classList.remove('vsh-show');
+    exitTopLayer(settingsEl);
+    settingsEl.remove();
+  }
+
+  function saveSettings() {
+    const q = (sel) => settingsEl.querySelector(sel);
+    CONFIG.STEP_BIG = Math.round(clampNum(q('#vsh-in-big').value, CONFIG.STEP_BIG / 60, 1, 480)) * 60;
+    CONFIG.STEP_MID = Math.round(clampNum(q('#vsh-in-mid').value, CONFIG.STEP_MID / 60, 1, 60)) * 60;
+    CONFIG.STEP_SMALL = Math.round(clampNum(q('#vsh-in-small').value, CONFIG.STEP_SMALL, 1, 600));
+    CONFIG.REPEAT_MS = Math.round(clampNum(q('#vsh-in-repeat').value, CONFIG.REPEAT_MS, 40, 1000));
+    CONFIG.IDLE_MS = clampNum(q('#vsh-in-idle').value, CONFIG.IDLE_MS / 1000, 0, 60) * 1000;
+    store.set('cfg', {
+      STEP_BIG: CONFIG.STEP_BIG,
+      STEP_MID: CONFIG.STEP_MID,
+      STEP_SMALL: CONFIG.STEP_SMALL,
+      REPEAT_MS: CONFIG.REPEAT_MS,
+      IDLE_MS: CONFIG.IDLE_MS
+    });
+
+    const disable = q('#vsh-in-disable').checked;
+    if (disable !== siteDisabled) {
+      let bl = store.get('blacklist', []);
+      if (!Array.isArray(bl)) bl = [];
+      if (disable) bl.push(location.hostname);
+      else bl = bl.filter((h) => h !== location.hostname);
+      store.set('blacklist', bl);
+    }
+    siteDisabled = disable;
+    ensureChip();
+    if (siteDisabled) {
+      items.slice().forEach(destroyItem);
+    } else {
+      items.forEach(updateButtonLabels);
+      scan();
+    }
+    closeSettings();
+  }
+
+  function buildSettingsPanel() {
+    const panel = document.createElement('div');
+    panel.className = 'vsh-settings';
+    panel.innerHTML = `
+      <h3>快进快退 · 设置</h3>
+      <div class="vsh-set-row"><span>大步长（分钟）</span><input id="vsh-in-big" type="number" min="1" max="480" step="1"></div>
+      <div class="vsh-set-row"><span>中步长（分钟）</span><input id="vsh-in-mid" type="number" min="1" max="60" step="1"></div>
+      <div class="vsh-set-row"><span>小步长（秒）</span><input id="vsh-in-small" type="number" min="1" max="600" step="1"></div>
+      <div class="vsh-set-row"><span>长按连发间隔（毫秒）</span><input id="vsh-in-repeat" type="number" min="40" max="1000" step="10"></div>
+      <div class="vsh-set-row"><span>自动隐藏延时（秒，0 为常驻）</span><input id="vsh-in-idle" type="number" min="0" max="60" step="0.1"></div>
+      <label class="vsh-set-check"><input id="vsh-in-disable" type="checkbox"><span></span></label>
+      <div class="vsh-set-actions">
+        <button type="button" id="vsh-reset">恢复默认</button>
+        <button type="button" id="vsh-cancel">取消</button>
+        <button type="button" id="vsh-save" class="vsh-primary">保存</button>
+      </div>`;
+    panel.querySelector('.vsh-set-check span').textContent = `在此站点禁用（${location.hostname}）`;
+
+    panel.querySelector('#vsh-cancel').addEventListener('click', closeSettings);
+    panel.querySelector('#vsh-save').addEventListener('click', saveSettings);
+    panel.querySelector('#vsh-reset').addEventListener('click', () => {
+      panel.querySelector('#vsh-in-big').value = DEFAULTS.STEP_BIG / 60;
+      panel.querySelector('#vsh-in-mid').value = DEFAULTS.STEP_MID / 60;
+      panel.querySelector('#vsh-in-small').value = DEFAULTS.STEP_SMALL;
+      panel.querySelector('#vsh-in-repeat').value = DEFAULTS.REPEAT_MS;
+      panel.querySelector('#vsh-in-idle').value = DEFAULTS.IDLE_MS / 1000;
+    });
+
+    // 阻断面板内事件透传到页面/播放器，避免输入时触发站点快捷键
+    ['pointerdown', 'pointerup', 'click', 'dblclick', 'touchstart', 'touchend', 'touchcancel', 'keyup', 'keypress', 'wheel']
+      .forEach((type) => panel.addEventListener(type, (e) => e.stopPropagation(), { passive: true }));
+    panel.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Escape') closeSettings();
+    });
+    return panel;
   }
 
   // ============ 移动端：进入全屏自动横屏 ============
@@ -575,6 +890,7 @@
   }
 
   function onFullscreenChange() {
+    if (settingsEl && settingsEl.classList.contains('vsh-show')) closeSettings();
     items.forEach(relocate);
     if (!CONFIG.AUTO_LANDSCAPE || !IS_TOUCH) return;
     if (fullscreenElement()) {
@@ -600,6 +916,8 @@
   }
 
   function scan() {
+    ensureChip(); // 禁用时显示角标入口，恢复启用时移除角标
+    if (siteDisabled) return;
     const videos = document.querySelectorAll('video');
     videos.forEach((v) => {
       if (seen.has(v)) return;
@@ -612,10 +930,12 @@
   function destroyItem(item) {
     clearTimeout(item.idleTimer);
     clearTimeout(item.tipTimer);
-    item.panes.concat([item.tip, item.toggle]).forEach((el) => {
+    item.panes.concat([item.tip, item.toggle, item.settingsBtn]).forEach((el) => {
       exitTopLayer(el);
       el.remove();
     });
+    // 从已见集合移除：SPA 把同一 <video> 临时移出再插回 DOM 时能重新挂上按钮
+    seen.delete(item.video);
     const index = items.indexOf(item);
     if (index !== -1) items.splice(index, 1);
   }
@@ -630,11 +950,26 @@
   injectStyle();
   scan();
 
-  const mo = new MutationObserver(() => scan());
+  // MutationObserver 去抖：动态页面 DOM 变更非常频繁，200ms 合并一次扫描
+  let scanTimer = null;
+  function scheduleScan() {
+    if (scanTimer || document.hidden) return; // 后台不扫，回到前台由 visibilitychange 补扫
+    scanTimer = setTimeout(() => {
+      scanTimer = null;
+      scan();
+    }, 200);
+  }
+  const mo = new MutationObserver(scheduleScan);
   mo.observe(document.documentElement, { childList: true, subtree: true });
 
-  // 有些视频是懒加载/稍后才变大，定时补扫
-  setInterval(scan, 2000);
+  // 有些视频是懒加载/稍后才变大：仅前台低频补扫，后台标签页完全跳过
+  setInterval(() => { if (!document.hidden) scan(); }, 2000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) scan(); });
+
+  // 油猴菜单入口（站点被禁用时也可由此打开设置重新启用）
+  if (typeof GM_registerMenuCommand === 'function') {
+    GM_registerMenuCommand('⚙ 快进快退按钮设置', openSettings);
+  }
 
   // 每帧同步位置（滚动/页面内全屏/布局变化都能跟随），开销很小
   function frameLoop() {
