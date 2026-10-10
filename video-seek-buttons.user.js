@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HTML5视频 快进快退按钮（左右纵排 5分钟/1分钟/10秒 · 全屏可用 · 手机适配）
 // @namespace    https://trae.local/video-seek-buttons
-// @version      1.7.1
+// @version      1.7.2
 // @description  快退键纵向排列在视频左侧、快进键纵向排列在右侧，纵向居中，自上而下为 5分钟/1分钟/10秒（步长可在 ⚙ 设置中自定义，支持站点黑名单）；容器全屏与原生视频全屏均可见，桌面+手机触摸长按连发（越按越快），自动跟随控件隐藏。
 // @author       you
 // @match        *://*/*
@@ -730,8 +730,8 @@
       if (fs) enterTopLayer(settingsEl);
       else exitTopLayer(settingsEl);
     }
-    settingsEl.querySelector('#vsh-in-big').value = CONFIG.STEP_BIG / 60;
-    settingsEl.querySelector('#vsh-in-mid').value = CONFIG.STEP_MID / 60;
+    settingsEl.querySelector('#vsh-in-big').value = CONFIG.STEP_BIG;
+    settingsEl.querySelector('#vsh-in-mid').value = CONFIG.STEP_MID;
     settingsEl.querySelector('#vsh-in-small').value = CONFIG.STEP_SMALL;
     settingsEl.querySelector('#vsh-in-repeat').value = CONFIG.REPEAT_MS;
     settingsEl.querySelector('#vsh-in-idle').value = CONFIG.IDLE_MS / 1000;
@@ -748,8 +748,8 @@
 
   function saveSettings() {
     const q = (sel) => settingsEl.querySelector(sel);
-    CONFIG.STEP_BIG = Math.round(clampNum(q('#vsh-in-big').value, CONFIG.STEP_BIG / 60, 1, 480)) * 60;
-    CONFIG.STEP_MID = Math.round(clampNum(q('#vsh-in-mid').value, CONFIG.STEP_MID / 60, 1, 60)) * 60;
+    CONFIG.STEP_BIG = Math.round(clampNum(q('#vsh-in-big').value, CONFIG.STEP_BIG, 1, 28800));
+    CONFIG.STEP_MID = Math.round(clampNum(q('#vsh-in-mid').value, CONFIG.STEP_MID, 1, 3600));
     CONFIG.STEP_SMALL = Math.round(clampNum(q('#vsh-in-small').value, CONFIG.STEP_SMALL, 1, 600));
     CONFIG.REPEAT_MS = Math.round(clampNum(q('#vsh-in-repeat').value, CONFIG.REPEAT_MS, 40, 1000));
     CONFIG.IDLE_MS = clampNum(q('#vsh-in-idle').value, CONFIG.IDLE_MS / 1000, 0, 60) * 1000;
@@ -785,8 +785,8 @@
     panel.className = 'vsh-settings';
     panel.innerHTML = `
       <h3>快进快退 · 设置</h3>
-      <div class="vsh-set-row"><span>大步长（分钟）</span><input id="vsh-in-big" type="number" min="1" max="480" step="1"></div>
-      <div class="vsh-set-row"><span>中步长（分钟）</span><input id="vsh-in-mid" type="number" min="1" max="60" step="1"></div>
+      <div class="vsh-set-row"><span>大步长（秒）</span><input id="vsh-in-big" type="number" min="5" max="28800" step="1"></div>
+      <div class="vsh-set-row"><span>中步长（秒）</span><input id="vsh-in-mid" type="number" min="5" max="3600" step="1"></div>
       <div class="vsh-set-row"><span>小步长（秒）</span><input id="vsh-in-small" type="number" min="1" max="600" step="1"></div>
       <div class="vsh-set-row"><span>长按连发间隔（毫秒）</span><input id="vsh-in-repeat" type="number" min="40" max="1000" step="10"></div>
       <div class="vsh-set-row"><span>自动隐藏延时（秒，0 为常驻）</span><input id="vsh-in-idle" type="number" min="0" max="60" step="0.1"></div>
@@ -801,8 +801,8 @@
     panel.querySelector('#vsh-cancel').addEventListener('click', closeSettings);
     panel.querySelector('#vsh-save').addEventListener('click', saveSettings);
     panel.querySelector('#vsh-reset').addEventListener('click', () => {
-      panel.querySelector('#vsh-in-big').value = DEFAULTS.STEP_BIG / 60;
-      panel.querySelector('#vsh-in-mid').value = DEFAULTS.STEP_MID / 60;
+      panel.querySelector('#vsh-in-big').value = DEFAULTS.STEP_BIG;
+      panel.querySelector('#vsh-in-mid').value = DEFAULTS.STEP_MID;
       panel.querySelector('#vsh-in-small').value = DEFAULTS.STEP_SMALL;
       panel.querySelector('#vsh-in-repeat').value = DEFAULTS.REPEAT_MS;
       panel.querySelector('#vsh-in-idle').value = DEFAULTS.IDLE_MS / 1000;
