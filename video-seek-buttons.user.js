@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HTML5视频 快进快退按钮（左右纵排 5分钟/1分钟/10秒 · 全屏可用 · 手机适配）
 // @namespace    https://trae.local/video-seek-buttons
-// @version      1.7.0
+// @version      1.7.1
 // @description  快退键纵向排列在视频左侧、快进键纵向排列在右侧，纵向居中，自上而下为 5分钟/1分钟/10秒（步长可在 ⚙ 设置中自定义，支持站点黑名单）；容器全屏与原生视频全屏均可见，桌面+手机触摸长按连发（越按越快），自动跟随控件隐藏。
 // @author       you
 // @match        *://*/*
@@ -547,8 +547,8 @@
     clearTimeout(item.idleTimer);
     if (item.expanded && !item.video.paused && CONFIG.IDLE_MS > 0) {
       item.idleTimer = setTimeout(() => {
-        item.expanded = false;
-        updateExpandedState(item);
+        // 仅随控件淡出，保留展开记忆：再次唤起（移动/点击）时仍保持展开
+        item.panes.forEach((p) => p.classList.remove('vsh-show'));
       }, CONFIG.IDLE_MS);
     }
   }
