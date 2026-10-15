@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HTML5视频 快进快退按钮（左右纵排 5分钟/1分钟/10秒 · 全屏可用 · 手机适配）
 // @namespace    https://trae.local/video-seek-buttons
-// @version      1.7.2
+// @version      1.7.3
 // @description  快退键纵向排列在视频左侧、快进键纵向排列在右侧，纵向居中，自上而下为 5分钟/1分钟/10秒（步长可在 ⚙ 设置中自定义，支持站点黑名单）；容器全屏与原生视频全屏均可见，桌面+手机触摸长按连发（越按越快），自动跟随控件隐藏。
 // @author       you
 // @match        *://*/*
@@ -31,6 +31,8 @@
     PANE_SCALE_MAX: 1,         // 桌面缩放上限
     PANE_SCALE_MAX_TOUCH: 0.9,       // 手机全屏缩放上限
     PANE_SCALE_MAX_TOUCH_PAGE: 0.75, // 手机非全屏（页面内嵌）缩放上限
+    TOGGLE_TOUCH_FS: 44,       // 手机全屏时右上角按钮的最小触控尺寸(px)
+    CONTROL_GAP_TOUCH_FS: 12,  // 手机全屏时右上角两个按钮的最小间距(px)
     IDLE_MS: 2600,      // 播放中静止多久后随控件一起淡出
     MIN_W: 300,         // 只给“大视频”挂按钮，过滤小预览视频
     MIN_H: 160
@@ -130,14 +132,14 @@
   .vsh-toggle {
     position: fixed;
     z-index: ${Z};
-    width: calc(34px * var(--vsh-s, 1));
-    height: calc(34px * var(--vsh-s, 1));
+    width: calc(34px * var(--vsh-cs, 1));
+    height: calc(34px * var(--vsh-cs, 1));
     padding: 0;
     border: none;
-    border-radius: calc(10px * var(--vsh-s, 1));
+    border-radius: calc(10px * var(--vsh-cs, 1));
     background: rgba(20, 22, 26, 0.72);
     color: #fff;
-    font-size: calc(18px * var(--vsh-s, 1));
+    font-size: calc(18px * var(--vsh-cs, 1));
     line-height: 1;
     cursor: pointer;
     user-select: none;
@@ -197,7 +199,7 @@
   .vsh-tip .vsh-arrow-ico { font-size: 30px; line-height: 1; }
   .vsh-tip .vsh-txt { font-size: 14px; font-weight: 600; }
   .vsh-tip .vsh-pos { font-size: 11px; opacity: .75; }
-  .vsh-gear { font-size: calc(15px * var(--vsh-s, 1)); }
+  .vsh-gear { font-size: calc(15px * var(--vsh-cs, 1)); }
   .vsh-settings {
     position: fixed;
     z-index: ${Z};
@@ -591,6 +593,14 @@
 
     const gap = CONFIG.EDGE_GAP;
     const centerY = r.top + r.height / 2;
+    const fs = fullscreenElement();
+    const isFsVideo = !!fs && (fs === item.video || (fs.contains && fs.contains(item.video)));
+    // 右上角按钮独立于按钮列缩放：移动端全屏时保证 44px 触控热区，减少误触
+    const isTouchFs = IS_TOUCH && isFsVideo;
+    const controlScale = isTouchFs ? Math.max(1, CONFIG.TOGGLE_TOUCH_FS / 34) : 1;
+    const controlGap = isTouchFs ? CONFIG.CONTROL_GAP_TOUCH_FS : 6;
+    item.toggle.style.setProperty('--vsh-cs', controlScale.toFixed(3));
+    item.settingsBtn.style.setProperty('--vsh-cs', controlScale.toFixed(3));
 
     // CSS 旋转兜底模式下：按钮改用旋转容器的本地坐标（横屏视角）
     if (rotateState.el && rotateState.el.contains(item.panes[0])) {
@@ -607,14 +617,12 @@
       item.toggle.style.top = `${gap}px`;
       item.toggle.style.left = `${rotToggleLeft}px`;
       item.settingsBtn.style.top = `${gap}px`;
-      item.settingsBtn.style.left = `${Math.max(gap, rotToggleLeft - item.settingsBtn.offsetWidth - 6)}px`;
+      item.settingsBtn.style.left = `${Math.max(gap, rotToggleLeft - item.settingsBtn.offsetWidth - controlGap)}px`;
       return;
     }
 
     // 按钮尺寸随视频高度自适应：视频越小按钮越小，上下限由 CONFIG 控制；
     // 手机端分场景限幅：全屏 0.9、页面内嵌 0.75，保证非全屏更小巧
-    const fs = fullscreenElement();
-    const isFsVideo = !!fs && (fs === item.video || (fs.contains && fs.contains(item.video)));
     const maxScale = IS_TOUCH
       ? (isFsVideo ? CONFIG.PANE_SCALE_MAX_TOUCH : CONFIG.PANE_SCALE_MAX_TOUCH_PAGE)
       : CONFIG.PANE_SCALE_MAX;
@@ -634,7 +642,7 @@
     item.toggle.style.top = `${r.top + gap}px`;
     item.toggle.style.left = `${toggleLeft}px`;
     item.settingsBtn.style.top = `${r.top + gap}px`;
-    item.settingsBtn.style.left = `${Math.max(r.left + gap, toggleLeft - item.settingsBtn.offsetWidth - 6 * scale)}px`;
+    item.settingsBtn.style.left = `${Math.max(r.left + gap, toggleLeft - item.settingsBtn.offsetWidth - controlGap)}px`;
   }
 
   // ============ 全屏适配 ============
