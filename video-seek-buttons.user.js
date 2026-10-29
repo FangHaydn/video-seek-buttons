@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HTML5视频 快进快退按钮（左右纵排 5分钟/1分钟/10秒 · 全屏可用 · 手机适配）
 // @namespace    https://trae.local/video-seek-buttons
-// @version      1.7.3
+// @version      1.7.4
 // @description  快退键纵向排列在视频左侧、快进键纵向排列在右侧，纵向居中，自上而下为 5分钟/1分钟/10秒（步长可在 ⚙ 设置中自定义，支持站点黑名单）；容器全屏与原生视频全屏均可见，桌面+手机触摸长按连发（越按越快），自动跟随控件隐藏。
 // @author       you
 // @match        *://*/*
@@ -31,8 +31,8 @@
     PANE_SCALE_MAX: 1,         // 桌面缩放上限
     PANE_SCALE_MAX_TOUCH: 0.9,       // 手机全屏缩放上限
     PANE_SCALE_MAX_TOUCH_PAGE: 0.75, // 手机非全屏（页面内嵌）缩放上限
-    TOGGLE_TOUCH_FS: 44,       // 手机全屏时右上角按钮的最小触控尺寸(px)
-    CONTROL_GAP_TOUCH_FS: 12,  // 手机全屏时右上角两个按钮的最小间距(px)
+    TOGGLE_TOUCH_MIN: 44,      // 触屏设备右上角按钮的最小触控尺寸(px)
+    CONTROL_GAP_TOUCH: 10,     // 触屏设备右上角两个按钮的间距(px)
     IDLE_MS: 2600,      // 播放中静止多久后随控件一起淡出
     MIN_W: 300,         // 只给“大视频”挂按钮，过滤小预览视频
     MIN_H: 160
@@ -130,16 +130,33 @@
     transform: translateY(-50%) translateX(0);
   }
   .vsh-toggle {
+    --vsh-toggle-size: 34px;
+    --vsh-toggle-radius: 10px;
+    --vsh-toggle-font-size: 18px;
+    --vsh-gear-font-size: 15px;
     position: fixed;
     z-index: ${Z};
-    width: calc(34px * var(--vsh-cs, 1));
-    height: calc(34px * var(--vsh-cs, 1));
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--vsh-toggle-size);
+    height: var(--vsh-toggle-size);
+    min-width: var(--vsh-toggle-size);
+    min-height: var(--vsh-toggle-size);
+    flex: 0 0 auto;
     padding: 0;
-    border: none;
-    border-radius: calc(10px * var(--vsh-cs, 1));
+    margin: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    border: 0;
+    outline: 0;
+    border-radius: var(--vsh-toggle-radius);
     background: rgba(20, 22, 26, 0.72);
     color: #fff;
-    font-size: calc(18px * var(--vsh-cs, 1));
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: var(--vsh-toggle-font-size);
+    font-weight: 600;
     line-height: 1;
     cursor: pointer;
     user-select: none;
@@ -151,6 +168,13 @@
   }
   .vsh-toggle:hover,
   .vsh-toggle:focus-visible { opacity: 1; background: rgba(20, 22, 26, .9); }
+  /* 触屏点击不绘制外框，避免 Android Edge 上出现贴边的小框；桌面键盘仍保留焦点提示 */
+  @media (hover: hover) and (pointer: fine) {
+    .vsh-toggle:focus-visible {
+      outline: 2px solid rgba(76,139,245,.9);
+      outline-offset: 2px;
+    }
+  }
   .vsh-btn {
     appearance: none;
     -webkit-appearance: none;
@@ -199,7 +223,7 @@
   .vsh-tip .vsh-arrow-ico { font-size: 30px; line-height: 1; }
   .vsh-tip .vsh-txt { font-size: 14px; font-weight: 600; }
   .vsh-tip .vsh-pos { font-size: 11px; opacity: .75; }
-  .vsh-gear { font-size: calc(15px * var(--vsh-cs, 1)); }
+  .vsh-gear { font-size: var(--vsh-gear-font-size); }
   .vsh-settings {
     position: fixed;
     z-index: ${Z};
@@ -559,6 +583,7 @@
     item.panes.forEach((p) => p.classList.toggle('vsh-show', item.expanded));
     item.toggle.textContent = item.expanded ? '×' : '⏩';
     item.toggle.title = item.expanded ? '折叠快进快退按钮' : '展开快进快退按钮';
+    item.toggle.setAttribute('aria-expanded', String(item.expanded));
     item.toggle.setAttribute('aria-label', item.toggle.title);
   }
 
@@ -595,12 +620,18 @@
     const centerY = r.top + r.height / 2;
     const fs = fullscreenElement();
     const isFsVideo = !!fs && (fs === item.video || (fs.contains && fs.contains(item.video)));
-    // 右上角按钮独立于按钮列缩放：移动端全屏时保证 44px 触控热区，减少误触
-    const isTouchFs = IS_TOUCH && isFsVideo;
-    const controlScale = isTouchFs ? Math.max(1, CONFIG.TOGGLE_TOUCH_FS / 34) : 1;
-    const controlGap = isTouchFs ? CONFIG.CONTROL_GAP_TOUCH_FS : 6;
-    item.toggle.style.setProperty('--vsh-cs', controlScale.toFixed(3));
-    item.settingsBtn.style.setProperty('--vsh-cs', controlScale.toFixed(3));
+    // 右上角按钮独立于按钮列缩放。直接传入带单位的像素值，避免部分
+    // Android Edge 不支持 calc(长度 * 自定义属性) 时整条尺寸声明失效。
+    const controlSize = IS_TOUCH ? CONFIG.TOGGLE_TOUCH_MIN : 34;
+    const controlGap = IS_TOUCH ? CONFIG.CONTROL_GAP_TOUCH : 6;
+    const toggleFontSize = IS_TOUCH ? 22 : 18;
+    const gearFontSize = IS_TOUCH ? 18 : 15;
+    [item.toggle, item.settingsBtn].forEach((el) => {
+      el.style.setProperty('--vsh-toggle-size', `${controlSize}px`);
+      el.style.setProperty('--vsh-toggle-radius', `${IS_TOUCH ? 12 : 10}px`);
+      el.style.setProperty('--vsh-toggle-font-size', `${toggleFontSize}px`);
+      el.style.setProperty('--vsh-gear-font-size', `${gearFontSize}px`);
+    });
 
     // CSS 旋转兜底模式下：按钮改用旋转容器的本地坐标（横屏视角）
     if (rotateState.el && rotateState.el.contains(item.panes[0])) {
