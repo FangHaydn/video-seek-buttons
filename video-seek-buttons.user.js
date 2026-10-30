@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         HTML5视频 快进快退按钮（左右纵排 5分钟/1分钟/10秒 · 全屏可用 · 手机适配）
 // @namespace    https://trae.local/video-seek-buttons
-// @version      1.7.8
-// @description  快退键纵向排列在视频左侧、快进键纵向排列在右侧，纵向居中，自上而下为 5分钟/1分钟/10秒（步长可在 ⚙ 设置中自定义，支持站点黑名单）；容器全屏与原生视频全屏均可见，桌面+手机触摸长按连发（越按越快），右上角按钮与快进快退按钮一起自动跟随控件隐藏/显示。
+// @version      1.8.0
+// @description  快退键纵向排列在视频左侧、快进键纵向排列在右侧，纵向居中，自上而下为 5分钟/1分钟/10秒；默认隐藏，点视频右上角的隐形热区或油猴「脚本菜单」即可显示/隐藏；步长、连发间隔、自动隐藏延时、站点黑名单都在油猴「脚本菜单」中设置，延时与显隐按网站永久记住；容器全屏与原生视频全屏均可见，桌面+手机触摸长按连发（越按越快），播放中静止后随控件一起淡出。
 // @author       you
 // @match        *://*/*
 // @license      MIT
@@ -31,9 +31,9 @@
     PANE_SCALE_MAX: 1,         // 桌面缩放上限
     PANE_SCALE_MAX_TOUCH: 0.9,       // 手机全屏缩放上限
     PANE_SCALE_MAX_TOUCH_PAGE: 0.75, // 手机非全屏（页面内嵌）缩放上限
-    TOGGLE_TOUCH_MIN: 44,      // 触屏设备右上角按钮的最小触控尺寸(px)
-    CONTROL_GAP_TOUCH: 10,     // 触屏设备右上角两个按钮的间距(px)
-    IDLE_MS: 2600,      // 播放中静止多久后随控件一起淡出
+    TOGGLE_SIZE: 44,           // 桌面：右上角隐形热区边长(px)
+    TOGGLE_TOUCH_MIN: 52,      // 触屏：右上角隐形热区边长(px)
+    IDLE_MS: 10000,     // 播放中静止多久后随控件一起淡出
     MIN_W: 300,         // 只给“大视频”挂按钮，过滤小预览视频
     MIN_H: 160
   };
@@ -73,6 +73,7 @@
   }
 
   // 启动时恢复已保存设置
+  // 步长/连发间隔全局生效；自动隐藏延时与按钮显隐按网站单独保存（见下方 siteState）
   (function loadSettings() {
     const s = store.get('cfg', null);
     if (!s || typeof s !== 'object') return;
@@ -80,8 +81,27 @@
     CONFIG.STEP_MID = Math.round(clampNum(s.STEP_MID, DEFAULTS.STEP_MID, 5, 3600));
     CONFIG.STEP_SMALL = Math.round(clampNum(s.STEP_SMALL, DEFAULTS.STEP_SMALL, 1, 600));
     CONFIG.REPEAT_MS = Math.round(clampNum(s.REPEAT_MS, DEFAULTS.REPEAT_MS, 40, 1000));
-    CONFIG.IDLE_MS = clampNum(s.IDLE_MS, DEFAULTS.IDLE_MS, 0, 60000);
   })();
+
+  // ============ 站点级缓存：自动隐藏延时 + 按钮显隐，按域名分别记住 ============
+  // 出厂默认：显隐为“隐藏”，延时为 IDLE_MS（10 秒）。在某个网站改过就永久写回该网站。
+  const SITE_STATE_KEY = 'site:' + location.hostname;
+  const siteState = (function loadSiteState() {
+    const s = store.get(SITE_STATE_KEY, null);
+    const state = { IDLE_MS: DEFAULTS.IDLE_MS, expanded: false };
+    if (s && typeof s === 'object') {
+      state.IDLE_MS = clampNum(s.IDLE_MS, DEFAULTS.IDLE_MS, 0, 60000);
+      state.expanded = s.expanded === true;
+    }
+    return state;
+  })();
+  CONFIG.IDLE_MS = siteState.IDLE_MS;
+  // 当前网站的显隐偏好：新出现的视频按它初始化，切换后立即持久化
+  let siteExpanded = siteState.expanded;
+
+  function saveSiteState() {
+    store.set(SITE_STATE_KEY, { IDLE_MS: CONFIG.IDLE_MS, expanded: siteExpanded });
+  }
 
   // 站点黑名单（在设置面板中切换）
   let siteDisabled = (function () {
@@ -129,8 +149,10 @@
     pointer-events: auto;
     transform: translateY(-50%) translateX(0);
   }
+  /* 右上角显隐按钮：完全不可见，只留一块“热区”随时可点。
+     它不参与自动淡出（不随延时隐藏），播放中静止后仍可点击唤出按钮列。 */
   .vsh-toggle {
-    --vsh-toggle-size: 34px;
+    --vsh-toggle-size: 44px;
     --vsh-toggle-radius: 10px;
     --vsh-toggle-font-size: 18px;
     position: fixed;
@@ -151,8 +173,8 @@
     border: 0;
     outline: 0;
     border-radius: var(--vsh-toggle-radius);
-    background: rgba(20, 22, 26, 0.72);
-    color: #fff;
+    background: transparent;
+    color: transparent;
     font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
     font-size: var(--vsh-toggle-font-size);
     font-weight: 600;
@@ -162,16 +184,8 @@
     -webkit-user-select: none;
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
-    opacity: .78;
-    /* 与按钮列（.vsh-pane）同节奏淡出/淡入 */
-    transition: opacity .22s ease, background .12s;
-  }
-  .vsh-toggle:hover,
-  .vsh-toggle:focus-visible { opacity: 1; background: rgba(20, 22, 26, .9); }
-  /* 播放中静止后与快进快退按钮一起隐藏；动一下再一起出现 */
-  .vsh-toggle.vsh-idle-hide {
     opacity: 0;
-    pointer-events: none;
+    pointer-events: auto;
   }
   /* 触屏点击不绘制外框，避免 Android Edge 上出现贴边的小框；桌面键盘仍保留焦点提示 */
   @media (hover: hover) and (pointer: fine) {
@@ -228,7 +242,7 @@
   .vsh-tip .vsh-arrow-ico { font-size: 30px; line-height: 1; }
   .vsh-tip .vsh-txt { font-size: 14px; font-weight: 600; }
   .vsh-tip .vsh-pos { font-size: 11px; opacity: .75; }
-  /* ⚙ 与展开/收起图标使用同一字号（继承 .vsh-toggle 的 --vsh-toggle-font-size） */
+  /* 设置面板：由油猴「脚本菜单」打开，居中浮层 */
   .vsh-settings {
     position: fixed;
     z-index: ${Z};
@@ -265,6 +279,7 @@
     font-size: 13px;
   }
   .vsh-set-check { display: flex; align-items: center; gap: 8px; margin: 12px 0 2px; cursor: pointer; }
+  .vsh-set-note { margin: 10px 0 0; font-size: 11px; line-height: 1.5; opacity: .6; }
   .vsh-set-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
   .vsh-set-actions button {
     appearance: none;
@@ -342,12 +357,16 @@
   }
 
   // ============ 每个视频的状态 ============
-  // item: { video, panes:[leftPane, rightPane], toggle, settingsBtn, buttons:[{el,seconds}], tip, idleTimer, tipTimer, expanded }
+  // item: { video, panes:[leftPane, rightPane], toggle, buttons:[{el,seconds}], tip, idleTimer, tipTimer, expanded }
   const items = [];
 
   // All document-level wake handling is shared by every video. This avoids
   // retaining one capture listener per video in long-lived SPA pages.
   function wakeFromDocument(e) {
+    // 点在右上角隐形热区上时不“动一下显示”：显隐完全由这次点击决定，
+    // 否则 pointerdown 会先把按钮显示出来，紧接着的 click 又把它关掉。
+    const t = e.target;
+    if (t && t.closest && t.closest('.vsh-toggle')) return;
     let x = null;
     let y = null;
     if (typeof e.clientX === 'number' && isFinite(e.clientX)) {
@@ -429,40 +448,23 @@
     toggle.type = 'button';
     toggle.className = 'vsh-toggle';
     toggle.textContent = ICON_EXPAND;
-    toggle.title = '展开快进快退按钮';
+    toggle.title = '显示/隐藏快进快退按钮';
     toggle.setAttribute('aria-label', toggle.title);
-
-    const settingsBtn = document.createElement('button');
-    settingsBtn.type = 'button';
-    settingsBtn.className = 'vsh-toggle vsh-gear';
-    settingsBtn.textContent = '⚙';
-    settingsBtn.title = '快进快退设置';
-    settingsBtn.setAttribute('aria-label', settingsBtn.title);
-    settingsBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      openSettings();
-    });
-    settingsBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
-    settingsBtn.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
 
     const item = {
       video,
       panes: [left.pane, right.pane],
       buttons: left.buttons.concat(right.buttons),
       toggle,
-      settingsBtn,
       tip,
       idleTimer: null,
       tipTimer: null,
-      expanded: false
+      expanded: siteExpanded // 默认隐藏；本网站改过就沿用记住的显隐
     };
     toggle.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      item.expanded = !item.expanded;
-      updateExpandedState(item);
-      if (item.expanded) wake(item);
+      toggleItem(item);
     });
     toggle.addEventListener('pointerdown', (e) => e.stopPropagation());
     toggle.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
@@ -578,28 +580,21 @@
   }
 
   // ---------- 自动隐藏：模拟原生控件，动一下显示，播放中静止淡出 ----------
-  // 右上角两个按钮与左右按钮列共用同一套节奏：一起显示、一起延时隐藏
-  function setTopButtonsHidden(item, hidden) {
-    [item.toggle, item.settingsBtn].forEach((el) => el.classList.toggle('vsh-idle-hide', hidden));
-  }
-
-  // 键盘焦点落在右上角按钮上时不隐藏，避免焦点停在看不见的按钮里
-  function isKeyboardFocused(item) {
-    return [item.toggle, item.settingsBtn].some((el) => {
-      try { return el.matches(':focus-visible'); } catch (e) { return false; }
-    });
+  // 只让左右按钮列淡出；右上角显隐热区不可见且始终可点，不参与淡出
+  // 键盘焦点在按钮列里时不淡出，避免焦点停在看不见的按钮上
+  function paneFocused(item) {
+    const active = document.activeElement;
+    return !!active && item.panes.some((p) => p.contains(active));
   }
 
   function wake(item) {
     updateExpandedState(item);
-    setTopButtonsHidden(item, false);
     clearTimeout(item.idleTimer);
     if (item.expanded && !item.video.paused && CONFIG.IDLE_MS > 0) {
       item.idleTimer = setTimeout(() => {
-        if (isKeyboardFocused(item)) return;
-        // 仅随控件淡出，保留展开记忆：再次唤起（移动/点击）时仍保持展开
+        if (paneFocused(item)) return;
+        // 仅随控件淡出，保留展开记忆：再次唤起（移动/点击热区）时仍保持展开
         item.panes.forEach((p) => p.classList.remove('vsh-show'));
-        setTopButtonsHidden(item, true);
       }, CONFIG.IDLE_MS);
     }
   }
@@ -607,9 +602,17 @@
   function updateExpandedState(item) {
     item.panes.forEach((p) => p.classList.toggle('vsh-show', item.expanded));
     item.toggle.textContent = item.expanded ? ICON_COLLAPSE : ICON_EXPAND;
-    item.toggle.title = item.expanded ? '折叠快进快退按钮' : '展开快进快退按钮';
     item.toggle.setAttribute('aria-expanded', String(item.expanded));
-    item.toggle.setAttribute('aria-label', item.toggle.title);
+  }
+
+  // 显隐切换：以“此刻是否真的看得见”为准取反，所以按钮淡出后再点热区就是重新显示
+  function toggleItem(item) {
+    const visible = item.panes[0].classList.contains('vsh-show');
+    item.expanded = !visible;
+    updateExpandedState(item);
+    if (item.expanded) wake(item);
+    siteExpanded = item.expanded;
+    saveSiteState(); // 显隐按网站永久记住
   }
 
   function bindAutoHide(item) {
@@ -623,17 +626,10 @@
     v.addEventListener('pause', () => {
       clearTimeout(item.idleTimer);
       updateExpandedState(item);
-      setTopButtonsHidden(item, false);
     });
     item.panes.forEach((p) => p.addEventListener('pointermove', wakeFn));
-    // 鼠标移到右上角按钮上（或键盘聚焦）时保持可见，别在手底下淡出
-    [item.toggle, item.settingsBtn].forEach((el) => {
-      el.addEventListener('pointermove', wakeFn);
-      el.addEventListener('pointerenter', wakeFn);
-      el.addEventListener('focus', wakeFn);
-    });
 
-    // 初始：暂停时常驻，播放时 2.6 秒后淡出
+    // 初始：暂停时常驻，播放中静止 IDLE_MS 后淡出
     wake(item);
   }
 
@@ -645,7 +641,6 @@
     item.panes.forEach((p) => { p.style.display = visible ? '' : 'none'; });
     item.tip.style.display = visible ? '' : 'none';
     item.toggle.style.display = visible ? '' : 'none';
-    item.settingsBtn.style.display = visible ? '' : 'none';
     if (!visible) return;
 
     const gap = CONFIG.EDGE_GAP;
@@ -654,14 +649,11 @@
     const isFsVideo = !!fs && (fs === item.video || (fs.contains && fs.contains(item.video)));
     // 右上角按钮独立于按钮列缩放。直接传入带单位的像素值，避免部分
     // Android Edge 不支持 calc(长度 * 自定义属性) 时整条尺寸声明失效。
-    const controlSize = IS_TOUCH ? CONFIG.TOGGLE_TOUCH_MIN : 34;
-    const controlGap = IS_TOUCH ? CONFIG.CONTROL_GAP_TOUCH : 6;
+    const controlSize = IS_TOUCH ? CONFIG.TOGGLE_TOUCH_MIN : CONFIG.TOGGLE_SIZE;
     const toggleFontSize = IS_TOUCH ? 22 : 18;
-    [item.toggle, item.settingsBtn].forEach((el) => {
-      el.style.setProperty('--vsh-toggle-size', `${controlSize}px`);
-      el.style.setProperty('--vsh-toggle-radius', `${IS_TOUCH ? 12 : 10}px`);
-      el.style.setProperty('--vsh-toggle-font-size', `${toggleFontSize}px`);
-    });
+    item.toggle.style.setProperty('--vsh-toggle-size', `${controlSize}px`);
+    item.toggle.style.setProperty('--vsh-toggle-radius', `${IS_TOUCH ? 12 : 10}px`);
+    item.toggle.style.setProperty('--vsh-toggle-font-size', `${toggleFontSize}px`);
 
     // CSS 旋转兜底模式下：按钮改用旋转容器的本地坐标（横屏视角）
     if (rotateState.el && rotateState.el.contains(item.panes[0])) {
@@ -674,11 +666,8 @@
       item.panes[1].style.right = `${gap}px`;
       item.tip.style.top = `${h / 2}px`;
       item.tip.style.left = `${w / 2}px`;
-      const rotToggleLeft = Math.max(gap, w - gap - item.toggle.offsetWidth);
       item.toggle.style.top = `${gap}px`;
-      item.toggle.style.left = `${rotToggleLeft}px`;
-      item.settingsBtn.style.top = `${gap}px`;
-      item.settingsBtn.style.left = `${Math.max(gap, rotToggleLeft - item.settingsBtn.offsetWidth - controlGap)}px`;
+      item.toggle.style.left = `${Math.max(gap, w - gap - item.toggle.offsetWidth)}px`;
       return;
     }
 
@@ -702,8 +691,6 @@
     const toggleLeft = Math.max(r.left + gap, r.right - gap - item.toggle.offsetWidth);
     item.toggle.style.top = `${r.top + gap}px`;
     item.toggle.style.left = `${toggleLeft}px`;
-    item.settingsBtn.style.top = `${r.top + gap}px`;
-    item.settingsBtn.style.left = `${Math.max(r.left + gap, toggleLeft - item.settingsBtn.offsetWidth - controlGap)}px`;
   }
 
   // ============ 全屏适配 ============
@@ -716,7 +703,7 @@
   //         → 系统接管渲染，任何网页元素都无法显示（浏览器限制）。
   function relocate(item) {
     const fs = fullscreenElement();
-    const targets = item.panes.concat([item.tip, item.toggle, item.settingsBtn]);
+    const targets = item.panes.concat([item.tip, item.toggle]);
 
     if (!fs) {
       targets.forEach((el) => exitTopLayer(el));
@@ -761,7 +748,7 @@
     el._vshPopover = false;
   }
 
-  // ============ 设置面板（⚙）与站点禁用角标 ============
+  // ============ 设置面板（油猴菜单打开）与站点禁用角标 ============
   let settingsEl = null;
   let chipEl = null;
 
@@ -826,9 +813,9 @@
       STEP_BIG: CONFIG.STEP_BIG,
       STEP_MID: CONFIG.STEP_MID,
       STEP_SMALL: CONFIG.STEP_SMALL,
-      REPEAT_MS: CONFIG.REPEAT_MS,
-      IDLE_MS: CONFIG.IDLE_MS
+      REPEAT_MS: CONFIG.REPEAT_MS
     });
+    saveSiteState(); // 自动隐藏延时按网站永久记住
 
     const disable = q('#vsh-in-disable').checked;
     if (disable !== siteDisabled) {
@@ -859,6 +846,7 @@
       <div class="vsh-set-row"><span>小步长（秒）</span><input id="vsh-in-small" type="number" min="1" max="600" step="1"></div>
       <div class="vsh-set-row"><span>长按连发间隔（毫秒）</span><input id="vsh-in-repeat" type="number" min="40" max="1000" step="10"></div>
       <div class="vsh-set-row"><span>自动隐藏延时（秒，0 为常驻）</span><input id="vsh-in-idle" type="number" min="0" max="60" step="0.1"></div>
+      <p class="vsh-set-note">自动隐藏延时与按钮显隐按网站单独记住，其他设置全局生效。</p>
       <label class="vsh-set-check"><input id="vsh-in-disable" type="checkbox"><span></span></label>
       <div class="vsh-set-actions">
         <button type="button" id="vsh-reset">恢复默认</button>
@@ -885,6 +873,47 @@
       if (e.key === 'Escape') closeSettings();
     });
     return panel;
+  }
+
+  // ============ 脚本菜单：显示/隐藏快进快退按钮 ============
+  // 页面上没有视频时给一句提示，避免菜单点了没反应
+  let menuTipEl = null;
+  let menuTipTimer = null;
+  function toast(msg) {
+    if (!menuTipEl) {
+      menuTipEl = document.createElement('div');
+      menuTipEl.className = 'vsh-tip';
+      menuTipEl.innerHTML = '<div class="vsh-txt"></div>';
+      menuTipEl.style.left = '50%';
+      menuTipEl.style.top = '50%';
+    }
+    menuTipEl.querySelector('.vsh-txt').textContent = msg;
+    document.body.appendChild(menuTipEl);
+    menuTipEl.classList.add('vsh-show');
+    clearTimeout(menuTipTimer);
+    menuTipTimer = setTimeout(() => menuTipEl.classList.remove('vsh-show'), 1400);
+  }
+
+  function toggleFromMenu() {
+    if (siteDisabled) {
+      // 本站已禁用：先打开设置，取消勾选即可恢复
+      openSettings();
+      return;
+    }
+    if (!items.length) scan();
+    if (!items.length) {
+      toast('当前页面没有可操作的视频');
+      return;
+    }
+    // 以“此刻是否真的看得见”为准：全都隐藏时→显示，否则→隐藏
+    const next = !items.some((it) => it.panes[0].classList.contains('vsh-show'));
+    siteExpanded = next;
+    saveSiteState(); // 显隐按网站永久记住
+    items.forEach((it) => {
+      it.expanded = next;
+      updateExpandedState(it);
+      if (next) wake(it);
+    });
   }
 
   // ============ 移动端：进入全屏自动横屏 ============
@@ -999,7 +1028,7 @@
   function destroyItem(item) {
     clearTimeout(item.idleTimer);
     clearTimeout(item.tipTimer);
-    item.panes.concat([item.tip, item.toggle, item.settingsBtn]).forEach((el) => {
+    item.panes.concat([item.tip, item.toggle]).forEach((el) => {
       exitTopLayer(el);
       el.remove();
     });
@@ -1035,8 +1064,10 @@
   setInterval(() => { if (!document.hidden) scan(); }, 2000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) scan(); });
 
-  // 油猴菜单入口（站点被禁用时也可由此打开设置重新启用）
+  // 页面内不再有 ⚙ 按钮：显隐与设置都放在油猴「脚本菜单」里
+  // （站点被禁用时也可由此打开设置重新启用）
   if (typeof GM_registerMenuCommand === 'function') {
+    GM_registerMenuCommand('显示/隐藏快进快退按钮', toggleFromMenu);
     GM_registerMenuCommand('⚙ 快进快退按钮设置', openSettings);
   }
 
