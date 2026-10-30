@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         HTML5视频 快进快退按钮（左右纵排 5分钟/1分钟/10秒 · 全屏可用 · 手机适配）
 // @namespace    https://trae.local/video-seek-buttons
-// @version      1.7.4
-// @description  快退键纵向排列在视频左侧、快进键纵向排列在右侧，纵向居中，自上而下为 5分钟/1分钟/10秒（步长可在 ⚙ 设置中自定义，支持站点黑名单）；容器全屏与原生视频全屏均可见，桌面+手机触摸长按连发（越按越快），自动跟随控件隐藏。
+// @version      1.7.5
+// @description  快退键纵向排列在视频左侧、快进键纵向排列在右侧，纵向居中，自上而下为 5分钟/1分钟/10秒（步长可在 ⚙ 设置中自定义，支持站点黑名单）；容器全屏与原生视频全屏均可见，桌面+手机触摸长按连发（越按越快），右上角按钮与快进快退按钮一起自动跟随控件隐藏/显示。
 // @author       you
 // @match        *://*/*
 // @license      MIT
@@ -164,10 +164,16 @@
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
     opacity: .78;
-    transition: opacity .18s, background .12s;
+    /* 与按钮列（.vsh-pane）同节奏淡出/淡入 */
+    transition: opacity .22s ease, background .12s;
   }
   .vsh-toggle:hover,
   .vsh-toggle:focus-visible { opacity: 1; background: rgba(20, 22, 26, .9); }
+  /* 播放中静止后与快进快退按钮一起隐藏；动一下再一起出现 */
+  .vsh-toggle.vsh-idle-hide {
+    opacity: 0;
+    pointer-events: none;
+  }
   /* 触屏点击不绘制外框，避免 Android Edge 上出现贴边的小框；桌面键盘仍保留焦点提示 */
   @media (hover: hover) and (pointer: fine) {
     .vsh-toggle:focus-visible {
@@ -568,13 +574,28 @@
   }
 
   // ---------- 自动隐藏：模拟原生控件，动一下显示，播放中静止淡出 ----------
+  // 右上角两个按钮与左右按钮列共用同一套节奏：一起显示、一起延时隐藏
+  function setTopButtonsHidden(item, hidden) {
+    [item.toggle, item.settingsBtn].forEach((el) => el.classList.toggle('vsh-idle-hide', hidden));
+  }
+
+  // 键盘焦点落在右上角按钮上时不隐藏，避免焦点停在看不见的按钮里
+  function isKeyboardFocused(item) {
+    return [item.toggle, item.settingsBtn].some((el) => {
+      try { return el.matches(':focus-visible'); } catch (e) { return false; }
+    });
+  }
+
   function wake(item) {
     updateExpandedState(item);
+    setTopButtonsHidden(item, false);
     clearTimeout(item.idleTimer);
     if (item.expanded && !item.video.paused && CONFIG.IDLE_MS > 0) {
       item.idleTimer = setTimeout(() => {
+        if (isKeyboardFocused(item)) return;
         // 仅随控件淡出，保留展开记忆：再次唤起（移动/点击）时仍保持展开
         item.panes.forEach((p) => p.classList.remove('vsh-show'));
+        setTopButtonsHidden(item, true);
       }, CONFIG.IDLE_MS);
     }
   }
@@ -598,8 +619,15 @@
     v.addEventListener('pause', () => {
       clearTimeout(item.idleTimer);
       updateExpandedState(item);
+      setTopButtonsHidden(item, false);
     });
     item.panes.forEach((p) => p.addEventListener('pointermove', wakeFn));
+    // 鼠标移到右上角按钮上（或键盘聚焦）时保持可见，别在手底下淡出
+    [item.toggle, item.settingsBtn].forEach((el) => {
+      el.addEventListener('pointermove', wakeFn);
+      el.addEventListener('pointerenter', wakeFn);
+      el.addEventListener('focus', wakeFn);
+    });
 
     // 初始：暂停时常驻，播放时 2.6 秒后淡出
     wake(item);
