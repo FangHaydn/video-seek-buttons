@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HTML5视频 快进快退按钮（左右纵排 5分钟/1分钟/10秒 · 全屏可用 · 手机适配）
 // @namespace    https://trae.local/video-seek-buttons
-// @version      1.7.5
+// @version      1.7.6
 // @description  快退键纵向排列在视频左侧、快进键纵向排列在右侧，纵向居中，自上而下为 5分钟/1分钟/10秒（步长可在 ⚙ 设置中自定义，支持站点黑名单）；容器全屏与原生视频全屏均可见，桌面+手机触摸长按连发（越按越快），右上角按钮与快进快退按钮一起自动跟随控件隐藏/显示。
 // @author       you
 // @match        *://*/*
@@ -104,12 +104,9 @@
     display: flex;
     flex-direction: column;
     /* --vsh-s 为尺寸缩放系数，由脚本按视频高度实时计算 */
-    gap: calc(8px * var(--vsh-s, 1));
+    gap: calc(10px * var(--vsh-s, 1));
     padding: calc(8px * var(--vsh-s, 1)) calc(6px * var(--vsh-s, 1));
-    background: rgba(20, 22, 26, 0.62);
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-    box-shadow: 0 2px 12px rgba(0,0,0,.35);
+    /* 列本身不画底板，只有按钮带背景，避免遮挡画面 */
     opacity: 0;
     pointer-events: none;
     transition: opacity .22s ease, transform .22s ease;
@@ -117,11 +114,9 @@
     touch-action: manipulation;
   }
   .vsh-pane.vsh-left {
-    border-radius: 0 calc(14px * var(--vsh-s, 1)) calc(14px * var(--vsh-s, 1)) 0;
     transform: translateY(-50%) translateX(-12px);
   }
   .vsh-pane.vsh-right {
-    border-radius: calc(14px * var(--vsh-s, 1)) 0 0 calc(14px * var(--vsh-s, 1));
     transform: translateY(-50%) translateX(12px);
   }
   .vsh-pane.vsh-show {
@@ -337,6 +332,11 @@
     return document.fullscreenElement || document.webkitFullscreenElement || null;
   }
 
+  // 按钮文案用精简单位（分钟 → 分）；中央提示气泡仍用 fmtDur 的完整说法
+  function fmtDurShort(sec) {
+    return fmtDur(sec).replace(' 分钟', ' 分');
+  }
+
   // ============ 每个视频的状态 ============
   // item: { video, panes:[leftPane, rightPane], toggle, settingsBtn, buttons:[{el,seconds}], tip, idleTimer, tipTimer, expanded }
   const items = [];
@@ -369,9 +369,9 @@
   // 按钮定义按 CONFIG 实时生成，设置保存后可立即刷新文案与步长
   // 左侧：快退（自上而下 大/中/小），右侧：快进
   function buttonDefs() {
-    const big = fmtDur(CONFIG.STEP_BIG);
-    const mid = fmtDur(CONFIG.STEP_MID);
-    const small = fmtDur(CONFIG.STEP_SMALL);
+    const big = fmtDurShort(CONFIG.STEP_BIG);
+    const mid = fmtDurShort(CONFIG.STEP_MID);
+    const small = fmtDurShort(CONFIG.STEP_SMALL);
     return [
       { label: `« ${big}`, seconds: -CONFIG.STEP_BIG, title: `快退 ${big}` },
       { label: `‹ ${mid}`, seconds: -CONFIG.STEP_MID, title: `快退 ${mid}` },
