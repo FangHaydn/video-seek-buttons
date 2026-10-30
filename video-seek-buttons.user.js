@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HTML5视频 快进快退按钮（左右纵排 5分钟/1分钟/10秒 · 全屏可用 · 手机适配）
 // @namespace    https://trae.local/video-seek-buttons
-// @version      1.7.6
+// @version      1.7.7
 // @description  快退键纵向排列在视频左侧、快进键纵向排列在右侧，纵向居中，自上而下为 5分钟/1分钟/10秒（步长可在 ⚙ 设置中自定义，支持站点黑名单）；容器全屏与原生视频全屏均可见，桌面+手机触摸长按连发（越按越快），右上角按钮与快进快退按钮一起自动跟随控件隐藏/显示。
 // @author       you
 // @match        *://*/*
@@ -128,7 +128,6 @@
     --vsh-toggle-size: 34px;
     --vsh-toggle-radius: 10px;
     --vsh-toggle-font-size: 18px;
-    --vsh-gear-font-size: 15px;
     position: fixed;
     z-index: ${Z};
     box-sizing: border-box;
@@ -224,7 +223,7 @@
   .vsh-tip .vsh-arrow-ico { font-size: 30px; line-height: 1; }
   .vsh-tip .vsh-txt { font-size: 14px; font-weight: 600; }
   .vsh-tip .vsh-pos { font-size: 11px; opacity: .75; }
-  .vsh-gear { font-size: var(--vsh-gear-font-size); }
+  /* ⚙ 与 ⏩/× 使用同一字号（继承 .vsh-toggle 的 --vsh-toggle-font-size） */
   .vsh-settings {
     position: fixed;
     z-index: ${Z};
@@ -653,12 +652,10 @@
     const controlSize = IS_TOUCH ? CONFIG.TOGGLE_TOUCH_MIN : 34;
     const controlGap = IS_TOUCH ? CONFIG.CONTROL_GAP_TOUCH : 6;
     const toggleFontSize = IS_TOUCH ? 22 : 18;
-    const gearFontSize = IS_TOUCH ? 18 : 15;
     [item.toggle, item.settingsBtn].forEach((el) => {
       el.style.setProperty('--vsh-toggle-size', `${controlSize}px`);
       el.style.setProperty('--vsh-toggle-radius', `${IS_TOUCH ? 12 : 10}px`);
       el.style.setProperty('--vsh-toggle-font-size', `${toggleFontSize}px`);
-      el.style.setProperty('--vsh-gear-font-size', `${gearFontSize}px`);
     });
 
     // CSS 旋转兜底模式下：按钮改用旋转容器的本地坐标（横屏视角）
