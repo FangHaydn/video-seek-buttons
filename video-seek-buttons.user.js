@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HTML5视频 快进快退按钮（左右纵排 5分钟/1分钟/10秒 · 全屏可用 · 手机适配）
 // @namespace    https://trae.local/video-seek-buttons
-// @version      1.7.7
+// @version      1.7.8
 // @description  快退键纵向排列在视频左侧、快进键纵向排列在右侧，纵向居中，自上而下为 5分钟/1分钟/10秒（步长可在 ⚙ 设置中自定义，支持站点黑名单）；容器全屏与原生视频全屏均可见，桌面+手机触摸长按连发（越按越快），右上角按钮与快进快退按钮一起自动跟随控件隐藏/显示。
 // @author       you
 // @match        *://*/*
@@ -94,6 +94,11 @@
   const IS_TOUCH =
     (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ||
     'ontouchstart' in window;
+
+  // 右上角按钮图标：统一用单色文字字形（与 ⚙ 同类型），避免 ⏩ 这类字符被渲染成彩色 emoji。
+  // U+23F5 不属于 emoji 字符集，任何平台都不会出现彩色版本。
+  const ICON_EXPAND = '\u23F5\u23F5';
+  const ICON_COLLAPSE = '\u00D7';
 
   // ============ 样式（只注入一次） ============
   const STYLE = `
@@ -223,7 +228,7 @@
   .vsh-tip .vsh-arrow-ico { font-size: 30px; line-height: 1; }
   .vsh-tip .vsh-txt { font-size: 14px; font-weight: 600; }
   .vsh-tip .vsh-pos { font-size: 11px; opacity: .75; }
-  /* ⚙ 与 ⏩/× 使用同一字号（继承 .vsh-toggle 的 --vsh-toggle-font-size） */
+  /* ⚙ 与展开/收起图标使用同一字号（继承 .vsh-toggle 的 --vsh-toggle-font-size） */
   .vsh-settings {
     position: fixed;
     z-index: ${Z};
@@ -423,7 +428,7 @@
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'vsh-toggle';
-    toggle.textContent = '⏩';
+    toggle.textContent = ICON_EXPAND;
     toggle.title = '展开快进快退按钮';
     toggle.setAttribute('aria-label', toggle.title);
 
@@ -601,7 +606,7 @@
 
   function updateExpandedState(item) {
     item.panes.forEach((p) => p.classList.toggle('vsh-show', item.expanded));
-    item.toggle.textContent = item.expanded ? '×' : '⏩';
+    item.toggle.textContent = item.expanded ? ICON_COLLAPSE : ICON_EXPAND;
     item.toggle.title = item.expanded ? '折叠快进快退按钮' : '展开快进快退按钮';
     item.toggle.setAttribute('aria-expanded', String(item.expanded));
     item.toggle.setAttribute('aria-label', item.toggle.title);
